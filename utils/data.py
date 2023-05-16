@@ -6,8 +6,17 @@ from pprint import pprint
 from tqdm import tqdm
 import shutil
 import itertools
+import more_itertools
+import numpy as np
+
+
 import re
 from dataclasses import dataclass, asdict
+
+SCALE_NAMES = ["Scale:0", "Scale:1", "Scale:2", "Scale:3"]
+SCALE_NORMAL_STATE = 5
+WARNINGLIGHT_NAMES = ["WarningLight:0", "WarningLight:1"]
+
 
 DEFAULT_DIRECTORY = "./data/"
 DATA_OWNER = "dicelab-rhul"
@@ -15,12 +24,25 @@ DATA_REPO = "icua-data-analysis"
 DATA_RELEASE_TAG = "v1.0.0-data"
 DATA_NAME = "ICUdata.zip"
 
-FILE_NAME_REGEX = ""
+# computes the time spent in failure for a particular task
+# 'fail' should be a binary numpy array with 1's for each event that represents a failure (e.g. the moment a warning light or scale switches to the wrong state)
+# 'timestamps' should be a numpy array of time stamps for each event
+def compute_time_in_failure(fail, timestamps, start_time, finish_time):
+    fail = np.pad(fail.astype(np.uint8), (1,1)) # pad with zeros either side (ensures even index cardinality)
+    timestamps = np.pad(timestamps, (1,1))      # pad with start/end time
+    timestamps[0] = start_time
+    timestamps[-1] = finish_time
+    y = np.pad(np.logical_xor(fail[:-1], fail[1:]), (1,0))
+    yi = np.arange(y.shape[0])[y]
+    ts = timestamps[yi].reshape(-1,2)
+    df = ts[:,1] - ts[:,0]
+    return dict(failure_intervals=ts, failure_proportion=df.sum() / (finish_time - start_time), 
+                timestamps=timestamps.copy(), failures=fail.copy())
 
-def create_dataset(force=False, n=None):
+def create_datasets(force=False, n=None):
+    # download(?) and generate a dataset from a given experiment log file. Each dataset is a collection of LineData objects.
     path = _get_dataset(force)
     files = list(sorted([f for f in path.iterdir() if f.suffix == ".txt"], key=lambda f: f.name))
-
     def data_generator(file, slice=None):
         with open(file, 'r') as f:
             try: 
@@ -28,12 +50,29 @@ def create_dataset(force=False, n=None):
                     yield LineData.from_line(line)
             except Exception as e: 
                 raise ValueError(f"Failed to parse file: {file}", e)
-
     dataset = dict()
     for file in tqdm(itertools.islice(files, n), desc="loading files..."):
         dataset[file.name] = [line for line in data_generator(file)]
     return dataset
-    
+
+def get_system_monitor_task_data(line_data):
+    start_time = LineData.get_start_time(line_data)
+    finish_time = LineData.get_finish_time(line_data)
+    wl_data = [np.array(LineData.pack_variables(LineData.findall_from_source(line_data, wl), "timestamp", "value")) for wl in WARNINGLIGHT_NAMES]
+    sc_data = [np.array(LineData.pack_variables(LineData.findall_from_source(line_data, sc), "timestamp", "value")) for sc in SCALE_NAMES]
+    data = wl_data + sc_data
+    #timestamp, value, fail
+    for i in range(len(data)):
+        data[i] = np.concatenate((data[i], np.zeros((data[i].shape[0], 1))),axis=-1)
+    # compute failure cases
+    for x in data[2:]: # for scales != 5
+        x[:,2] = (x[:,1] != SCALE_NORMAL_STATE) # in failure
+    data[0][:,2] = (data[0][:,1] == 0) # in failure
+    data[1][:,2] = (data[1][:,1] == 1) # in failure
+    return dict(components={k:v for k,v in zip(WARNINGLIGHT_NAMES + SCALE_NAMES, data)}, start_time=start_time, finish_time=finish_time)
+
+
+
 @dataclass
 class LineData:
     indx: int
@@ -58,6 +97,14 @@ class LineData:
             return cls(indx, timestamp, event_src, event_dst, variables)
         else:
             raise ValueError(f"Line:\n '{line}'\n   does not match pattern")
+
+    @classmethod
+    def get_start_time(cls, data):
+        return data[0].timestamp
+
+    @classmethod
+    def get_finish_time(cls, data):
+        return data[-1].timestamp
 
     @classmethod
     def findall_from_source(cls, data, event_src):
