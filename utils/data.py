@@ -17,8 +17,6 @@ DATA_NAME = "ICUdata.zip"
 
 FILE_NAME_REGEX = ""
 
-
-
 def create_dataset(force=False, n=None):
     path = _get_dataset(force)
     files = list(sorted([f for f in path.iterdir() if f.suffix == ".txt"], key=lambda f: f.name))
@@ -66,6 +64,14 @@ class LineData:
         # search through all "lines" to find all eyetracking events
         return list(filter(lambda x: x.event_src == event_src, data))
     
+    @classmethod
+    def in_from_source(cls, data, event_src):
+        try:
+            next(filter(lambda x: x.event_src == event_src, data)) # exception if empty
+            return True
+        except:
+            return False
+
     @classmethod
     def pack_variables(cls, data, *keys):
         result = []
