@@ -9,6 +9,7 @@ import numpy as np
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 import re
+import pandas as pd
 
 from types import SimpleNamespace
 from cycler import cycler
@@ -18,13 +19,20 @@ from tqdm import tqdm
 
 from dataclasses import dataclass, asdict
 
+# valid states from config files (TODO CHANGE IF THE EXPERIMENTS CHANGE)
+TARGET_DISTANCE = 50
 SCALE_NORMAL_STATE = 5
+FUEL_CAPACITY = 2000
+FUEL_ACCEPTABLE_RANGE = (FUEL_CAPACITY/2-FUEL_CAPACITY*0.3,FUEL_CAPACITY/2+FUEL_CAPACITY*0.3)
 
 # widget names
 SCALE_NAMES = ["Scale:0", "Scale:1", "Scale:2", "Scale:3"]
 WARNINGLIGHT_NAMES = ["WarningLight:0", "WarningLight:1"]
+FUEL_TANK_NAMES = ["FuelTank:A", "FuelTank:B"]
+
 EYETRACKER_NAME = "EyeTracker:0"
 EYETRACKERSTUB_NAME = "EyeTrackerStub"
+TARGET_NAME = "Target:0"
 
 # data loading
 DEFAULT_DIRECTORY = "./data/"
@@ -36,31 +44,15 @@ DEMO_FILE = "ICUData/demographics.xlsx"
 
 # window properties
 WINDOW_SIZE = (800,800)
-TRACKING_WINDOW_PROPERTIES = {'position': np.array((351.25, 37.85)), 'size': np.array((341.25, 341.25)), 'color':'red'}
-FUEL_WINDOW_PROPERTIES = {'position': np.array((253.75, 455.71428571428567)), 'size': np.array((536.25, 334.2857142857143)), 'color':'blue'}
-SYSTEM_WINDOW_PROPERTIES = {'position': np.array((10.0, 37.857142857142854)), 'size': np.array((243.75, 390.0)), 'color':'green'}
+TRACKING_WINDOW_PROPERTIES = {'position': np.array((351.25, 37.85)), 'size': np.array((341.25, 341.25)), 'color':'red', 'warning_name':'Highlight:TrackingMonitor', 'data_fn':lambda dataset:get_tracking_task_data(dataset) }
+FUEL_WINDOW_PROPERTIES = {'position': np.array((253.75, 455.71428571428567)), 'size': np.array((536.25, 334.2857142857143)), 'color':'blue', 'warning_name':'Highlight:FuelMonitor','data_fn':lambda dataset:get_fuel_task_data(dataset)  }
+SYSTEM_WINDOW_PROPERTIES = {'position': np.array((10.0, 37.857142857142854)), 'size': np.array((243.75, 390.0)), 'color':'green', 'warning_name':'Highlight:SystemMonitor', 'data_fn':lambda dataset: get_system_monitor_task_data(dataset) }
 ALL_WINDOW_PROPERTIES = {'system':SYSTEM_WINDOW_PROPERTIES, 'fuel':FUEL_WINDOW_PROPERTIES, 'tracking':TRACKING_WINDOW_PROPERTIES}
 
 # plotting
 ICU_BACKGROUND_IMAGE = mpimg.imread('./results/images/background.png') # background image
 COLOR_CYCLE = cycler(color=['#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990', '#dcbeff', '#9A6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#a9a9a9', '#ffffff', '#000000'])
 plt.rcParams['axes.prop_cycle'] = COLOR_CYCLE
-
-def get_system_monitor_task_data(line_data):
-    start_time = LineData.get_start_time(line_data)
-    finish_time = LineData.get_finish_time(line_data)
-    wl_data = [np.array(LineData.pack_variables(LineData.findall_from_src(line_data, wl), "timestamp", "value")) for wl in WARNINGLIGHT_NAMES]
-    sc_data = [np.array(LineData.pack_variables(LineData.findall_from_src(line_data, sc), "timestamp", "value")) for sc in SCALE_NAMES]
-    data = wl_data + sc_data
-    #timestamp, value, fail
-    for i in range(len(data)):
-        data[i] = np.concatenate((data[i], np.zeros((data[i].shape[0], 1))),axis=-1)
-    # compute failure cases
-    for x in data[2:]: # for scales != 5
-        x[:,2] = (x[:,1] != SCALE_NORMAL_STATE) # in failure
-    data[0][:,2] = (data[0][:,1] == 0) # in failure
-    data[1][:,2] = (data[1][:,1] == 1) # in failure
-    return dict(components={k:v for k,v in zip(WARNINGLIGHT_NAMES + SCALE_NAMES, data)}, start_time=start_time, finish_time=finish_time)
 
 # get time stamp of each click event grouped by the clicked component
 def get_clicks(line_data):
@@ -80,8 +72,6 @@ class Statistics:
         raise NotImplementedError() # TODO 
 
     
-
-
 # numpy array of time intervals to merge overlapping
 def merge_intervals(intervals):
     assert all([y.shape[-1] == 2 for y in intervals])
@@ -158,8 +148,32 @@ def get_system_monitor_task_data(line_data):
         x[:,2] = (x[:,1] != SCALE_NORMAL_STATE) # in failure
     data[0][:,2] = (data[0][:,1] == 0) # in failure
     data[1][:,2] = (data[1][:,1] == 1) # in failure
-    return SimpleNamespace(**dict(components={k:SimpleNamespace(timestamp=v[:,0], value=v[:,1], failure=v[:,2]) for k,v in zip(WARNINGLIGHT_NAMES + SCALE_NAMES, data)}, start_time=start_time, finish_time=finish_time))
+    return SimpleNamespace(**dict(components={k:pd.DataFrame(dict(timestamp=v[:,0], value=v[:,1], failure=v[:,2])) for k,v in zip(WARNINGLIGHT_NAMES + SCALE_NAMES, data)}, start_time=start_time, finish_time=finish_time))
 
+def get_tracking_task_data(line_data, l2_threshold=50):
+    start_time = LineData.get_start_time(line_data)
+    finish_time = LineData.get_finish_time(line_data)
+    def failure_l2(x, y, l2_threshold=50): 
+        return np.sqrt(x ** 2 + y ** 2) > l2_threshold
+    target_data = LineData.findall_from_src(line_data, TARGET_NAME)
+    target_data = LineData.pack_variables(target_data, "timestamp", "x", "y")
+    target_data = np.array(target_data)
+    fail = failure_l2(target_data[:,1], target_data[:,2], l2_threshold=l2_threshold)  
+    df = pd.DataFrame(dict(timestamp=target_data[:,0], x=target_data[:,1], y=target_data[:,2], failure=fail))
+    return SimpleNamespace(components={TARGET_NAME:df}, start_time=start_time, finish_time=finish_time)
+    
+
+def get_fuel_task_data(line_data):
+    start_time = LineData.get_start_time(line_data)
+    finish_time = LineData.get_finish_time(line_data)
+    def _get_data(src, line_data):
+        data = LineData.findall_from_key_value(line_data, "label", "fuel")
+        data = np.array(LineData.pack_variables(data, "timestamp", "acceptable"))
+        # TODO include the tanks value? this will need to be obtained from other events (label:change)
+        return pd.DataFrame(dict(timestamp=data[:,0], failure=1-data[:,1]))
+    tank_data = {src:_get_data(src, line_data) for src in FUEL_TANK_NAMES}
+    return SimpleNamespace(components=tank_data, start_time=start_time, finish_time=finish_time)
+    
 
 
 @dataclass
