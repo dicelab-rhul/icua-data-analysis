@@ -10,6 +10,7 @@ import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 import re
 import pandas as pd
+import json
 
 from types import SimpleNamespace
 from cycler import cycler
@@ -44,9 +45,9 @@ DEMO_FILE = "ICUData/demographics.xlsx"
 
 # window properties
 WINDOW_SIZE = (800,800)
-TRACKING_WINDOW_PROPERTIES = {'position': np.array((351.25, 37.85)), 'size': np.array((341.25, 341.25)), 'color':'red', 'warning_name':'Highlight:TrackingMonitor', 'data_fn':lambda dataset:get_tracking_task_data(dataset) }
-FUEL_WINDOW_PROPERTIES = {'position': np.array((253.75, 455.71428571428567)), 'size': np.array((536.25, 334.2857142857143)), 'color':'blue', 'warning_name':'Highlight:FuelMonitor','data_fn':lambda dataset:get_fuel_task_data(dataset)  }
-SYSTEM_WINDOW_PROPERTIES = {'position': np.array((10.0, 37.857142857142854)), 'size': np.array((243.75, 390.0)), 'color':'green', 'warning_name':'Highlight:SystemMonitor', 'data_fn':lambda dataset: get_system_monitor_task_data(dataset) }
+TRACKING_WINDOW_PROPERTIES = {'position': np.array((351.25, 37.85)), 'size': np.array((341.25, 341.25)), 'color':'#4363d8', 'warning_name':'Highlight:TrackingMonitor', 'data_fn':lambda dataset:get_tracking_task_data(dataset) }
+FUEL_WINDOW_PROPERTIES = {'position': np.array((253.75, 455.71428571428567)), 'size': np.array((536.25, 334.2857142857143)), 'color':'#3cb44b', 'warning_name':'Highlight:FuelMonitor','data_fn':lambda dataset:get_fuel_task_data(dataset)  }
+SYSTEM_WINDOW_PROPERTIES = {'position': np.array((10.0, 37.857142857142854)), 'size': np.array((243.75, 390.0)), 'color':'#e6194B', 'warning_name':'Highlight:SystemMonitor', 'data_fn':lambda dataset: get_system_monitor_task_data(dataset) }
 ALL_WINDOW_PROPERTIES = {'system':SYSTEM_WINDOW_PROPERTIES, 'fuel':FUEL_WINDOW_PROPERTIES, 'tracking':TRACKING_WINDOW_PROPERTIES}
 
 # plotting
@@ -167,8 +168,9 @@ def get_fuel_task_data(line_data):
     start_time = LineData.get_start_time(line_data)
     finish_time = LineData.get_finish_time(line_data)
     def _get_data(src, line_data):
-        data = LineData.findall_from_key_value(line_data, "label", "fuel")
-        data = np.array(LineData.pack_variables(data, "timestamp", "acceptable"))
+        line_data = LineData.findall_from_src(line_data, src)
+        line_data = LineData.findall_from_key_value(line_data, "label", "fuel")
+        data = np.array(LineData.pack_variables(line_data, "timestamp", "acceptable"))
         # TODO include the tanks value? this will need to be obtained from other events (label:change)
         return pd.DataFrame(dict(timestamp=data[:,0], failure=1-data[:,1]))
     tank_data = {src:_get_data(src, line_data) for src in FUEL_TANK_NAMES}
@@ -300,3 +302,45 @@ def _get_dataset(force=False):
 #plt.gca().add_patch(plt.Rectangle(TRACKING_WINDOW_PROPERTIES['position'], *TRACKING_WINDOW_PROPERTIES['size'], color='red', fill=False))
 #plt.gca().add_patch(plt.Rectangle(FUEL_WINDOW_PROPERTIES['position'], *FUEL_WINDOW_PROPERTIES['size'], color='red', fill=False))
 #plt.gca().add_patch(plt.Rectangle(SYSTEM_WINDOW_PROPERTIES['position'], *SYSTEM_WINDOW_PROPERTIES['size'], color='red', fill=False))
+
+
+# save/load a dict of numpy arrays.
+
+def save_nested_dict(data, directory):
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
+    meta_data = {}
+
+    for key, value in data.items():
+        if isinstance(value, dict):
+            path = os.path.join(directory, str(key))
+            save_nested_dict(value, path)
+        elif isinstance(value, np.ndarray):
+            np.savez_compressed(os.path.join(directory, f"{key}.npz"), value=value)
+        else:
+            meta_data[key] = value
+
+    if meta_data:
+        with open(os.path.join(directory, "meta.json"), "w") as file:
+            json.dump(meta_data, file)
+
+def load_nested_dict(directory):
+    data = {}
+
+    meta_path = os.path.join(directory, "meta.json")
+    if os.path.exists(meta_path):
+        with open(meta_path, "r") as file:
+            meta_data = json.load(file)
+            data.update(meta_data)
+
+    for item in os.listdir(directory):
+        path = os.path.join(directory, item)
+        if os.path.isdir(path):
+            data[item] = load_nested_dict(path)
+        elif item.endswith('.npz'):
+            key = item[:-4]  # Remove '.npz' extension
+            npz_data = np.load(path)
+            data[key] = npz_data['value']
+
+    return dict(sorted(data.items()))
