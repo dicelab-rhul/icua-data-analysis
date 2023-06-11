@@ -11,6 +11,14 @@
 
 4. for calibration purposes, ICUa v2 should also record the screen.
 
+
+-> NEW
+
+5. participant 18 icuaA eye tracker seems to have crashed halfway through.
+
+6. since the arrow and the highlights show at the same time, its hard to know if they are using one or the other... we cant really know if they are following the arrow. An experiment is needed with different combinations of guidance.
+
+
 ### CHECKLIST 
 
 - Implemented a parser for the event log files that can sort/extract data easily.

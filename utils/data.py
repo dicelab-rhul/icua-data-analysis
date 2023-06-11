@@ -34,6 +34,7 @@ FUEL_TANK_NAMES = ["FuelTank:A", "FuelTank:B"]
 EYETRACKER_NAME = "EyeTracker:0"
 EYETRACKERSTUB_NAME = "EyeTrackerStub"
 TARGET_NAME = "Target:0"
+ARROW_NAME = "arrow_rotator_TEST"
 
 # data loading
 DEFAULT_DIRECTORY = "./data/"
@@ -65,13 +66,20 @@ class Statistics:
     @classmethod
     def compute_failure_proportion(cls, intervals, start_time, finish_time):
         # computes the total proportion of 
-        intervals = merge_intervals(intervals)
         dt = intervals[:,1] - intervals[:,0]
         return dt.sum() / (finish_time - start_time)
 
-    def compute_overlapping_proportion(cls, *intervals):
-        raise NotImplementedError() # TODO 
+    @classmethod 
+    def compute_mean_interval_length(cls, intervals, *args):
+        dt = intervals[:,1] - intervals[:,0]
+        if dt.shape[0] == 0:
+            return 0. # if there are no intervals, then the mean length is 0
+        else :
+            return dt.mean()
 
+    @classmethod
+    def compute_failure_count(cls, intervals, *args):
+        return intervals.shape[0]
     
 # numpy array of time intervals to merge overlapping
 def merge_intervals(intervals):
@@ -99,11 +107,11 @@ def compute_num_groups_of_ones(binary):
 # computes the time spent in failure for a particular task
 # 'binary' should be a binary numpy array with 1's for each event that represents a given state (e.g. the moment a warning light or scale switches to the wrong state)
 # 'timestamps' should be a numpy array of time stamps for each event
-def compute_time_intervals(binary, timestamps, start_time, finish_time):
+def compute_time_intervals(binary, timestamps, start_time, finish_time, pad='finish'):
     binary = np.pad(binary.astype(np.uint8), (1,1)) # pad with zeros either side (ensures even index cardinality)
-    timestamps = np.pad(timestamps, (1,1))      # pad with start/end time
+    timestamps = np.pad(timestamps, (1,1))          # pad with start/end time
     timestamps[0] = start_time
-    timestamps[-1] = finish_time
+    timestamps[-1] = finish_time if pad == 'finish' else timestamps[-2] # otherwise pad with the current value...
     y = np.pad(np.logical_xor(binary[:-1], binary[1:]), (1,0))
     yi = np.arange(y.shape[0])[y]
     ts = timestamps[yi].reshape(-1,2)
@@ -133,6 +141,16 @@ def create_datasets(force=False, n=None):
     dataset = dict()
     for file in tqdm(itertools.islice(files, n), desc="loading files..."):
         dataset[file.name] = [line for line in data_generator(file)]
+        # fix eye tracking timestamps... this is annoying but it is what it is..
+        eye_first_timestamp = None
+        eye_1prev_timestamp = None
+        for i, line in enumerate(dataset[file.name]):
+            if line.event_src == EYETRACKER_NAME: # first occurance of eyetracker data. 
+                eye_first_timestamp = line.timestamp
+                eye_1prev_timestamp = dataset[file.name][i-1].timestamp # i should not be 0...
+                break
+        for line in LineData.findall_from_src(dataset[file.name], EYETRACKER_NAME):
+            line.timestamp = (line.timestamp - eye_first_timestamp) + eye_1prev_timestamp    
     return dataset
 
 def get_system_monitor_task_data(line_data):
@@ -149,7 +167,7 @@ def get_system_monitor_task_data(line_data):
         x[:,2] = (x[:,1] != SCALE_NORMAL_STATE) # in failure
     data[0][:,2] = (data[0][:,1] == 0) # in failure
     data[1][:,2] = (data[1][:,1] == 1) # in failure
-    return SimpleNamespace(**dict(components={k:pd.DataFrame(dict(timestamp=v[:,0], value=v[:,1], failure=v[:,2])) for k,v in zip(WARNINGLIGHT_NAMES + SCALE_NAMES, data)}, start_time=start_time, finish_time=finish_time))
+    return SimpleNamespace(**dict(components={k:pd.DataFrame(dict(timestamp=v[:,0], value=v[:,1], failure=v[:,2].astype(bool))) for k,v in zip(WARNINGLIGHT_NAMES + SCALE_NAMES, data)}, start_time=start_time, finish_time=finish_time))
 
 def get_tracking_task_data(line_data, l2_threshold=50):
     start_time = LineData.get_start_time(line_data)
@@ -172,7 +190,7 @@ def get_fuel_task_data(line_data):
         line_data = LineData.findall_from_key_value(line_data, "label", "fuel")
         data = np.array(LineData.pack_variables(line_data, "timestamp", "acceptable"))
         # TODO include the tanks value? this will need to be obtained from other events (label:change)
-        return pd.DataFrame(dict(timestamp=data[:,0], failure=1-data[:,1]))
+        return pd.DataFrame(dict(timestamp=data[:,0], failure=1-data[:,1].astype(bool)))
     tank_data = {src:_get_data(src, line_data) for src in FUEL_TANK_NAMES}
     return SimpleNamespace(components=tank_data, start_time=start_time, finish_time=finish_time)
     
@@ -242,12 +260,12 @@ class LineData:
             return False
 
     @classmethod
-    def pack_variables(cls, data, *keys):
+    def pack_variables(cls, data, *keys, sort_by='timestamp'):
         result = []
+        sort_by = keys.index(sort_by)
         for line in data:
             result.append([line.variables.get(k, asdict(line).get(k, None)) for k in keys])
-        return result
-
+        return list(sorted(result, key=lambda v : v[sort_by]))
 
 # pull data from github and save it locally
 def _get_dataset(force=False):
@@ -296,6 +314,64 @@ def _get_dataset(force=False):
     return clean_directory
     
 
+def get_eyetracking_data(dataset):
+    eye_data = LineData.pack_variables(LineData.findall_from_src(dataset, EYETRACKER_NAME), "timestamp", "label", "x", "y")
+    eye_data = np.array(eye_data)
+    gi = (eye_data[:,1] == "gaze").astype(bool) # gaze = 1, saccade = 0
+    t, x, y = eye_data[:,0].astype(np.float64), eye_data[:,2].astype(np.float32), eye_data[:,3].astype(np.float32)
+    return pd.DataFrame(data=dict(timestamp=t,x=x,y=y,gaze=gi))
+
+def get_warning_data(dataset):
+    finish_time = LineData.get_finish_time(dataset)
+    def get_data_from_source(src):
+        data = np.array(LineData.pack_variables(LineData.findall_from_src(dataset, src), "timestamp", "value"))
+        data = data.reshape(data.shape[0], 2) # in case there are no events
+        if data.shape[0] % 2 != 0:
+            # the session ended with a warning... add another event to match it (turn off at the end of session)
+            data = np.concatenate([data, np.zeros((1,2))])
+            data[-1,0] = finish_time
+        return pd.DataFrame(dict(timestamp=data[:,0], value=data[:,1].astype(bool)))
+    # dataframes instead?
+    return {k:get_data_from_source(v['warning_name']) for k,v in ALL_WINDOW_PROPERTIES.items()}
+
+def get_task_data(dataset):
+    return {task:properties['data_fn'](dataset).components for task, properties in ALL_WINDOW_PROPERTIES.items()}    
+    
+def get_demographics_data():
+    df = pd.read_excel("./data/ICUdata/demographics.xlsx")
+    df = df[['Participant Number', 'Easy icu A', 'Easy icua A', 'Hard icu B', 'Hard icua B']]
+    df = df.rename(columns={"Participant Number": "participant", 'Easy icu A':0, 'Easy icua A':1, 'Hard icu B':2, 'Hard icua B':3})
+    df = df.applymap(lambda x: x.replace(" ", "").replace("'", ""))
+    return df
+
+def get_arrow_data(dataset):
+    line_data_arrow = LineData.findall_from_src(dataset, ARROW_NAME)
+    data_arrow = np.array(LineData.pack_variables(line_data_arrow, "timestamp", "angle")).reshape(len(line_data_arrow),2)
+    return pd.DataFrame(dict(timestamp=data_arrow[:,0], angle_delta=data_arrow[:,1], angle=data_arrow[:,1].cumsum()))
+
+def get_keyboard_data(dataset):
+    line_data_keyboard = LineData.findall_from_src(dataset, "KeyHandler")
+    data_keyboard = np.array(LineData.pack_variables(line_data_keyboard, "timestamp", "key", "action"))
+    return pd.DataFrame(dict(timestamp=data_keyboard[:,0], key=data_keyboard[:,1], action=data_keyboard[:,2]))
+  
+def get_mouse_data(dataset):
+    line_data_mouse = LineData.findall_from_key_value(dataset, "label", "click")
+    data_mouse = np.array(LineData.pack_variables(line_data_mouse, "timestamp", "event_dst", "x", "y"))
+    df = pd.DataFrame(dict(timestamp=data_mouse[:,0].astype(np.float64), 
+                             dst=data_mouse[:,1]))
+    def get_task_from_component(x):
+        if "Pump" in x:
+            return "fuel"
+        elif "WarningLight" in x or "Scale" in x:
+            return "system"
+        else:
+            raise ValueError(f"Unexpected component {x}")
+ 
+    df['task'] = df['dst'].apply(get_task_from_component)
+    df['x'] = data_mouse[:,2].astype(int)
+    df['y'] = data_mouse[:,3].astype(int)
+    return df
+
 # sanity check for window properties
 #plt.figure()
 #plt.imshow(img)
@@ -318,6 +394,8 @@ def save_nested_dict(data, directory):
             save_nested_dict(value, path)
         elif isinstance(value, np.ndarray):
             np.savez_compressed(os.path.join(directory, f"{key}.npz"), value=value)
+        elif isinstance(value, pd.DataFrame):  # Handle DataFrame objects
+            value.to_csv(os.path.join(directory, f"{key}.csv"), index=False)
         else:
             meta_data[key] = value
 
@@ -342,5 +420,8 @@ def load_nested_dict(directory):
             key = item[:-4]  # Remove '.npz' extension
             npz_data = np.load(path)
             data[key] = npz_data['value']
+        elif item.endswith('.csv'):  # Handle DataFrame files
+            key = item[:-4]  # Remove '.csv' extension
+            data[key] = pd.read_csv(path)
 
     return dict(sorted(data.items()))
