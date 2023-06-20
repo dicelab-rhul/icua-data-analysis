@@ -1,0 +1,17 @@
+participant,0,1,2,3,S0,S1,S2,S3
+P01,icuA,icuaA,icuB,icuaB,veasy,veasy,easy,easy
+P02,icuA,icuB,icuaB,icuaA,veasy,easy,hard,moderate
+P03,icuB,icuaB,icuA,icuaA,easy,moderate,easy,easy
+P04,icuaB,icuB,icuA,icuaA,moderate,hard,easy,easy
+P05,icuB,icuaB,icuA,icuaA,moderate,hard,easy,easy
+P06,icuaB,icuaA,icuB,icuA,moderate,easy,hard,easy
+P07,icuaA,icuaB,icuB,icuA,veasy,moderate,easy,veasy
+P08,icuA,icuaB,icuB,icuaA,easy,hard,hard,moderate
+P09,icuaA,icuaB,icuB,icuA,easy,hard,moderate,easy
+P10,icuB,icuaB,icuA,icuaA,moderate,moderate,easy,easy
+P16,icuaA,icuB,icuaB,icuA,moderate,easy,moderate,veasy
+P17,icuaB,icuaA,icuB,icuA,hard,veasy,moderate,easy
+P18,icuB,icuaB,icuaA,icuA,moderate,moderate,easy,easy
+P23,icuB,icuaB,icuA,icuaA,moderate,moderate,veasy,veasy
+P24,icuaA,icuB,icuA,icuaB,hard,moderate,moderate,moderate
+P25,icuA,icuaB,icuB,icuaA,veasy,hard,moderate,easy

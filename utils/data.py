@@ -339,7 +339,7 @@ def get_task_data(dataset):
     
 def get_demographics_data():
     df = pd.read_excel("./data/ICUdata/demographics.xlsx")
-    df = df[['Participant Number', 'Easy icu A', 'Easy icua A', 'Hard icu B', 'Hard icua B']]
+    df = df[['Participant Number', 'Easy icu A', 'Easy icua A', 'Hard icu B', 'Hard icua B', ]]
     df = df.rename(columns={"Participant Number": "participant", 'Easy icu A':0, 'Easy icua A':1, 'Hard icu B':2, 'Hard icua B':3})
     df = df.applymap(lambda x: x.replace(" ", "").replace("'", ""))
     return df
@@ -403,7 +403,7 @@ def save_nested_dict(data, directory):
         with open(os.path.join(directory, "meta.json"), "w") as file:
             json.dump(meta_data, file)
 
-def load_nested_dict(directory):
+def load_nested_dict(directory, ignore=['P00']):
     data = {}
 
     meta_path = os.path.join(directory, "meta.json")
@@ -413,6 +413,8 @@ def load_nested_dict(directory):
             data.update(meta_data)
 
     for item in os.listdir(directory):
+        if any([(item in ig) for ig in ignore]):
+            continue
         path = os.path.join(directory, item)
         if os.path.isdir(path):
             data[item] = load_nested_dict(path)

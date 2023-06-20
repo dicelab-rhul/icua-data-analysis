@@ -1,4 +1,24 @@
 # icua-data-analysis
+### TODO
+
+
+exhaustive combinations of when people look when they act when it fails - did they look back after looking at a highlight?
+
+compare subsequences in categorical sequences - e.g. they are on the fuel task, highlight shows on system, is the sequence of actions the same? 
+
+arrow pointing to the task (throw away saccades etc). 
+
+differences in best and worst performers, are there any differences in the way they act in the exhaustive combinations?
+
+
+
+
+
+Q: Do they improve over time? 
+A: Hard to say without more trials... there doesnt appear to be significiant trend. (see demographics.ipynb)
+
+Q: People who said they did better, did they actually?
+A: For the most part yes (see demographics.ipynb)
 
 
 ### NOTES
@@ -17,7 +37,6 @@
 5. participant 18 icuaA eye tracker seems to have crashed halfway through.
 
 6. since the arrow and the highlights show at the same time, its hard to know if they are using one or the other... we cant really know if they are following the arrow. An experiment is needed with different combinations of guidance.
-
 
 ### CHECKLIST 
 
