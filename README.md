@@ -14,12 +14,21 @@ differences in best and worst performers, are there any differences in the way t
 
 
 
-Q: Do they improve over time? 
-A: Hard to say without more trials... there doesnt appear to be significiant trend. (see demographics.ipynb)
+Q: Do participants improve over time? 
+A: Hard to say without more trials... there doesn't appear to be significant trend. (see demographics.ipynb)
 
-Q: People who said they did better, did they actually?
+Q: Participants who said they did better, did they actually?
 A: For the most part yes (see demographics.ipynb)
 
+Q: Do participants look at one task while solving/interacting with another? 
+A: Participants tend to look at the task that they are solving, keyboard/mouse input for a task is almost always done when looking at the task.
+
+Q: What performance metrics might we use? 
+A: 
+    1. proportion of total time that there is a failure.
+    2. average length of failures.
+    3. number of failures.
+    4. ... ???
 
 ### NOTES
 
@@ -30,9 +39,6 @@ A: For the most part yes (see demographics.ipynb)
 3. only 17 participants have proper eyetracking data, make it more clear in future experiments if the eyetracker is not correctly setup. 
 
 4. for calibration purposes, ICUa v2 should also record the screen.
-
-
--> NEW
 
 5. participant 18 icuaA eye tracker seems to have crashed halfway through.
 
@@ -54,4 +60,3 @@ A: For the most part yes (see demographics.ipynb)
 - Using the group statistics (or processed data (e.g. intervals)) we should work out some performance metrics to use for comparison.
 - Try to draw some numerical links between user interaction (eye/mouse) and highlights. Data is ready for this step, but it is not entirely clear how to do it. The "warning" intervals tell us something about each participant reaction to agent feedback without much further analysis? Otherwise, comparing the "time in error" intervals for icu and icua WITH and WITHOUT feedback may be sufficient - we are interested mostly in the times where feedback is given...
 
-- Another thing to look at is whether the gaze positions and other input (mouse/keyboard) coincide, or whether people are looking at one thing but doing another.
