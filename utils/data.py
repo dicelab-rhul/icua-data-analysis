@@ -20,6 +20,11 @@ from tqdm import tqdm
 
 from dataclasses import dataclass, asdict
 
+# ignore participants that have problems...
+IGNORE = ['P00', 'P03']
+IGNORE_NO_EYETRACKING = IGNORE + ['P22', 'P14', 'P21', 'P20', 'P13', 'P12', 'P11', 'P15', 'P19']
+
+
 # valid states from config files (TODO CHANGE IF THE EXPERIMENTS CHANGE)
 TARGET_DISTANCE = 50
 SCALE_NORMAL_STATE = 5
@@ -60,27 +65,7 @@ plt.rcParams['axes.prop_cycle'] = COLOR_CYCLE
 def get_clicks(line_data):
     line_data = LineData.findall_from_src(line_data, "Canvas") # will contain all click events
     return {k:np.array(LineData.pack_variables(v, "timestamp")) for k,v in LineData.groupby_dst(line_data)}
-    
-class Statistics:
 
-    @classmethod
-    def compute_failure_proportion(cls, intervals, start_time, finish_time):
-        # computes the total proportion of 
-        dt = intervals[:,1] - intervals[:,0]
-        return dt.sum() / (finish_time - start_time)
-
-    @classmethod 
-    def compute_mean_interval_length(cls, intervals, *args):
-        dt = intervals[:,1] - intervals[:,0]
-        if dt.shape[0] == 0:
-            return 0. # if there are no intervals, then the mean length is 0
-        else :
-            return dt.mean()
-
-    @classmethod
-    def compute_failure_count(cls, intervals, *args):
-        return intervals.shape[0]
-    
 # numpy array of time intervals to merge overlapping
 def merge_intervals(intervals):
     assert all([y.shape[-1] == 2 for y in intervals])
@@ -119,13 +104,16 @@ def compute_time_intervals(binary, timestamps, start_time, finish_time, pad='fin
     return SimpleNamespace(**dict(intervals=ts, proportion=df.sum() / (finish_time - start_time), 
                 timestamps=timestamps.copy(), binary=binary.copy()))
 
-def get_clean_datasets(force=False, n=None):
+def get_clean_datasets(force=False, n=None, eyetracking=True):
     n = n * 4 if n is not None else None
     datasets = create_datasets(force=force, n=n)
     # prune dataset to contain only those with valid eyetracking data...
-    datasets = {k:data for k, data in datasets.items() if LineData.contains_src(data, EYETRACKER_NAME)}
+    if eyetracking:
+        datasets = {k:data for k, data in datasets.items() if LineData.contains_src(data, EYETRACKER_NAME)}
     datasets = list(sorted([(k.split(".")[0],v) for k,v in datasets.items()], key=lambda x: x[0][:3]))
-    return {k:dict(g) for k,g in itertools.groupby(datasets, key=lambda x: x[0][:3])}
+    datasets = {k:dict(g) for k,g in itertools.groupby(datasets, key=lambda x: x[0][:3])}
+    del datasets['P03'] # remove P03 as they did not complete icuB
+    return datasets
 
 def create_datasets(force=False, n=None):
     # download(?) and generate a dataset from a given experiment log file. Each dataset is a collection of LineData objects.
@@ -295,6 +283,8 @@ def _get_dataset(force=False):
                     .replace(" ","").replace("hard","B")\
                     .replace("easy","A").split("-")[-1]\
                     .replace("p","P").replace("11x", "P11").replace("01x", "01")
+            if new_name == "P10icua": # fix not named correctly...
+                new_name = "P10icuaA"
             return pathlib.Path(f.parent.parent, DATA_NAME.split(".")[0],  new_name)
 
         files = [(f, clean_file_name(f)) for f in pathlib.Path(data_directory).iterdir() if f.name.endswith(".txt") and "event_log" not in f.name]
@@ -317,6 +307,8 @@ def _get_dataset(force=False):
 def get_eyetracking_data(dataset):
     eye_data = LineData.pack_variables(LineData.findall_from_src(dataset, EYETRACKER_NAME), "timestamp", "label", "x", "y")
     eye_data = np.array(eye_data)
+    if eye_data.shape[0] == 0:
+        return None # no eyetracking data from this dataset! it is missing for some participants :(
     gi = (eye_data[:,1] == "gaze").astype(bool) # gaze = 1, saccade = 0
     t, x, y = eye_data[:,0].astype(np.float64), eye_data[:,2].astype(np.float32), eye_data[:,3].astype(np.float32)
     return pd.DataFrame(data=dict(timestamp=t,x=x,y=y,gaze=gi))
@@ -336,12 +328,16 @@ def get_warning_data(dataset):
 
 def get_task_data(dataset):
     return {task:properties['data_fn'](dataset).components for task, properties in ALL_WINDOW_PROPERTIES.items()}    
-    
-def get_demographics_data():
+
+def get_demographics_data(eyetracking=False, ignore=['P00', 'P03']):
     df = pd.read_excel("./data/ICUdata/demographics.xlsx")
-    df = df[['Participant Number', 'Easy icu A', 'Easy icua A', 'Hard icu B', 'Hard icua B', ]]
-    df = df.rename(columns={"Participant Number": "participant", 'Easy icu A':0, 'Easy icua A':1, 'Hard icu B':2, 'Hard icua B':3})
+    df = df[['Participant Number', 'Easy icu A', 'Easy icua A', 'Hard icu B', 'Hard icua B', 'Scores', 'Scores.1', 'Scores.2', 'Scores.3']]
+    df = df.rename(columns={"Participant Number": "participant", 'Easy icu A':0, 'Easy icua A':1, 'Hard icu B':2, 'Hard icua B':3, 
+                            'Scores' : 'S0', 'Scores.1' : 'S1', 'Scores.2' : 'S2', 'Scores.3' : 'S3'})
     df = df.applymap(lambda x: x.replace(" ", "").replace("'", ""))
+    
+    valid_participants = load_nested_dict('data/Processed', eyetracking=eyetracking, ignore=ignore).keys()
+    df = df[df['participant'].isin(valid_participants)] # ignore some participants...
     return df
 
 def get_arrow_data(dataset):
@@ -403,9 +399,9 @@ def save_nested_dict(data, directory):
         with open(os.path.join(directory, "meta.json"), "w") as file:
             json.dump(meta_data, file)
 
-def load_nested_dict(directory, ignore=['P00']):
-    data = {}
 
+def load_nested_dict(directory,ignore=IGNORE):
+    data = {}
     meta_path = os.path.join(directory, "meta.json")
     if os.path.exists(meta_path):
         with open(meta_path, "r") as file:

@@ -2,6 +2,35 @@
 from IPython.display import display, Markdown, HTML 
 import markdown2
 # markdown stuff...
+import re
+
+def markdown_table_to_latex(markdown_table):
+    # Splitting markdown table by rows
+    rows = markdown_table.replace("_", "\\_").strip().split('\n')
+
+    # Extracting headers and determining column count
+    headers = re.split(r'\s*\|\s*', rows[0].strip('|'))
+    num_columns = len(headers)
+
+    # Creating LaTeX table header
+    latex_table = '\\begin{tabular}{|' + 'c|' * num_columns + '}\n'
+    latex_table += '\\hline\n'
+
+    # Adding headers to LaTeX table
+    latex_table += ' & '.join(headers) + ' \\\\\n'
+    latex_table += '\\hline\n'
+
+    # Adding rows to LaTeX table
+    for row in rows[2:]:
+        cells = re.split(r'\s*\|\s*', row.strip('|'))
+        latex_table += ' & '.join(cells) + ' \\\\\n'
+
+    # Completing LaTeX table
+    latex_table += '\\hline\n'
+    latex_table += '\\end{tabular}'
+
+    return latex_table
+
 
 def embed_markdown_tables(markdown_tables, nrows=None, ncols=None, headers=None):
     ncols = ncols if ncols is not None else len(markdown_tables)
